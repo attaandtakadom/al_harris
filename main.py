@@ -5,7 +5,7 @@ from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-# --- 1. خادم الاستيقاظ (Keep Alive) لبيئة Render ---
+# --- 1. خادم الاستيقاظ (Keep Alive) ---
 app = Flask('')
 
 @app.route('/')
@@ -42,16 +42,13 @@ async def is_user_subscribed(bot, user_id):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
-    
     subscribed = await is_user_subscribed(context.bot, user_id)
     
     if subscribed:
-        # واجهة المشتركين - زر واحد فقط للمنظومة
         keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         text = f"✅ أهلاً بك يا {user.first_name}\n\nلقد تم التحقق من اشتراكك بنجاح. يمكنك الآن فتح التطبيق التعليمي:"
     else:
-        # واجهة غير المشتركين
         keyboard = [
             [InlineKeyboardButton("1️⃣ انضم للقناة أولاً 📢", url=CHANNEL_LINK)],
             [InlineKeyboardButton("2️⃣ تأكيد الاشتراك ✅", callback_data='check_again')]
@@ -74,146 +71,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- 6. تشغيل البوت ---
 def main():
     if not TOKEN:
-        print("خطأ: لم يتم العثور على التوكن في إعدادات Render!")
         return
-
     keep_alive()
-
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
-    
-    print("البوت يعمل الآن بأمان على Render...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        allowed_statuses = ['member', 'administrator', 'creator']
-        return member.status in allowed_statuses
-    except Exception as e:
-        logging.error(f"خطأ في فحص العضوية: {e}")
-        return False
-
-# --- 4. معالجة أمر البداية /start ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    user_id = user.id
-    
-    # فحص الاشتراك
-    subscribed = await is_user_subscribed(context.bot, user_id)
-    
-    if subscribed:
-        # واجهة المشتركين
-        keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"✅ أهلاً بك يا {user.first_name}\n\nلقد تم التحقق من اشتراكك بنجاح. يمكنك الآن فتح التطبيق التعليمي:"
-    else:
-        # واجهة غير المشتركين
-        keyboard = [
-            [InlineKeyboardButton("1️⃣ انضم للقناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ تأكيد الاشتراك ✅", callback_data='check_again')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        text = "⚠️ **عذراً، يجب عليك الانضمام للقناة أولاً!**\n\nيرجى الانضمام ثم العودة والضغط على زر التأكيد."
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-
-# --- 5. معالج الأزرار ---
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'check_again':
-        await start(update, context)
-
-# --- 6. تشغيل البوت ---
-def main():
-    if not TOKEN:
-        print("خطأ: لم يتم العثور على التوكن في إعدادات Render!")
-        return
-
-    # تشغيل خادم الاستيقاظ
-    keep_alive()
-
-    # بناء تطبيق البوت
-    application = Application.builder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    
-    print("البوت يعمل الآن بأمان على Render...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        allowed_statuses = ['member', 'administrator', 'creator']
-        return member.status in allowed_statuses
-    except Exception as e:
-        logging.error(f"خطأ في فحص العضوية: {e}")
-        return False
-
-# --- 4. معالجة أمر البداية /start ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    user_id = user.id
-    
-    # فحص الاشتراك
-    subscribed = await is_user_subscribed(context.bot, user_id)
-    
-    if subscribed:
-        # واجهة المشتركين
-       # واجهة المشتركين - إضافة زر للابتدائي وزر للثانوي
-       if subscribed:
-        # واجهة المشتركين
-        keyboard = [
-            [InlineKeyboardButton("المنظومة الابتدائية 📱", web_app=WebAppInfo(url=APP_URL))],
-[InlineKeyboardButton("منظومة الثانوية العامة 🎓", web_app=WebAppInfo(url="https://atta-and-takadom.wuaze.com/"))]        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"✅ أهلاً بك يا {user.first_name}\n\nيرجى اختيار المرحلة الدراسية المطلوبة:"
-    else:
-        # واجهة غير المشتركين
-        # ... بقية الكود كما هو    else:
-        # واجهة غير المشتركين
-        keyboard = [
-            [InlineKeyboardButton("1️⃣ انضم للقناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ تأكيد الاشتراك ✅", callback_data='check_again')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        text = "⚠️ **عذراً، يجب عليك الانضمام للقناة أولاً!**\n\nيرجى الانضمام ثم العودة والضغط على زر التأكيد."
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-
-# --- 5. معالج الأزرار ---
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'check_again':
-        await start(update, context)
-
-# --- 6. تشغيل البوت ---
-def main():
-    if not TOKEN:
-        print("خطأ: لم يتم العثور على التوكن في إعدادات Render!")
-        return
-
-    # تشغيل خادم الاستيقاظ
-    keep_alive()
-
-    # بناء تطبيق البوت
-    application = Application.builder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    
-    print("البوت يعمل الآن بأمان على Render...")
     application.run_polling()
 
 if __name__ == '__main__':
