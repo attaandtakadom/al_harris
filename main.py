@@ -57,8 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # واجهة المشتركين
         keyboard = [
             [InlineKeyboardButton("المنظومة الابتدائية 📱", web_app=WebAppInfo(url=APP_URL))],
-            [InlineKeyboardButton("منظومة الثانوية العامة 🎓", url="https://t.me/your_link")]
-        ]
+[InlineKeyboardButton("منظومة الثانوية العامة 🎓", web_app=WebAppInfo(url="https://atta-and-takadom.wuaze.com/"))]        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         text = f"✅ أهلاً بك يا {user.first_name}\n\nيرجى اختيار المرحلة الدراسية المطلوبة:"
     else:
