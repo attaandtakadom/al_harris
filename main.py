@@ -52,10 +52,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if subscribed:
         # واجهة المشتركين
-        keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
+       # واجهة المشتركين - إضافة زر للابتدائي وزر للثانوي
+        keyboard = [
+            [InlineKeyboardButton("المنظومة الابتدائية 📱", web_app=WebAppInfo(url=APP_URL))],
+            [InlineKeyboardButton("منظومة الثانوية العامة 🎓", url="https://atta-and-takadom.wuaze.com/")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"✅ أهلاً بك يا {user.first_name}\n\nلقد تم التحقق من اشتراكك بنجاح. يمكنك الآن فتح التطبيق التعليمي:"
-    else:
+        text = f"✅ أهلاً بك يا {user.first_name}\n\nيرجى اختيار المرحلة الدراسية المطلوبة:" else:
         # واجهة غير المشتركين
         keyboard = [
             [InlineKeyboardButton("1️⃣ انضم للقناة أولاً 📢", url=CHANNEL_LINK)],
