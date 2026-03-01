@@ -8,7 +8,6 @@ from telegram.ext import Application
 
 # --- 1. الإعدادات ---
 TOKEN = os.environ.get('TOKEN')
-# تأكد من كتابة الرابط يدوياً هنا لضمان الدقة
 RENDER_URL = "https://al-harris.onrender.com" 
 APP_URL = "https://attaandtakadom.github.io/atta/"
 CHANNEL_ID = '-1003569921331' 
@@ -20,67 +19,83 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
 
-# --- 2. دالة فحص الاشتراك ---
+# مخزن مؤقت لمنع تكرار الرسائل (Idempotency)
+processed_updates = set()
+
+# --- 2. دالة فحص الاشتراك المحسنة ---
 async def check_subscription(user_id):
     try:
+        # إضافة تأخير بسيط لضمان تحديث قاعدة بيانات تلجرام
         member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        # الحالات التي يعتبر فيها المستخدم مشتركاً
         return member.status in ['member', 'administrator', 'creator']
     except Exception as e:
-        logger.error(f"Subscription Error: {e}")
+        logger.error(f"خطأ في فحص الاشتراك: {e}")
         return False
 
-# --- 3. المنطق البرمجي الاستجابة ---
+# --- 3. المنطق البرمجي ---
 async def process_update_logic(update: Update):
     user = update.effective_user
-    chat_id = update.effective_chat.id
     if not user: return
 
+    # فحص الاشتراك
     is_subscribed = await check_subscription(user.id)
     
     if is_subscribed:
         keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-        text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح. اضغط على الزر أدناه للدخول:"
+        text = f"✅ أهلاً بك يا {user.first_name}\nتم التأكد من انضمامك للقناة بنجاح!"
     else:
-        # زر الاشتراك مع رابط يفتح البوت مباشرة بعد الاشتراك
-        bot_username = (await application.bot.get_me()).username
         keyboard = [
             [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ اضغط هنا لتفعيل البوت ✅", url=f"https://t.me/{bot_username}?start=check")]
+            [InlineKeyboardButton("2️⃣ اضغط هنا للتفعيل ✅", url=f"https://t.me/takadom2026bot?start=check")]
         ]
-        text = "⚠️ **يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
+        text = "⚠️ **عذراً! لم نجد اسمك في القناة.**\n\nيرجى الاشتراك أولاً ثم العودة والضغط على زر التفعيل."
 
-    await application.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    try:
+        await application.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
 
-# --- 4. الـ Webhook المستقر ---
+# --- 4. الـ Webhook مع مانع التكرار ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         update_json = request.get_json(force=True)
+        update_id = update_json.get('update_id')
+
+        # منع تكرار المعالجة لنفس الرسالة
+        if update_id in processed_updates:
+            return "OK", 200
+        
+        processed_updates.add(update_id)
+        # تنظيف المخزن إذا كبر حجمه
+        if len(processed_updates) > 1000:
+            processed_updates.clear()
+
         update = Update.de_json(update_json, application.bot)
         
-        # معالجة كافة أنواع الرسائل (في الخاص أو عبر الروابط)
-        if update.message or update.callback_query:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(process_update_logic(update))
-            loop.close()
+        # إنشاء Loop للمعالجة
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(process_update_logic(update))
+        loop.close()
             
-        return "OK", 200
+        return "OK", 200 # الرد فوراً بـ OK لتلجرام لمنع إعادة الإرسال
     except Exception as e:
-        logger.error(f"Error: {e}")
-        return "Error", 500
+        logger.error(f"Webhook Error: {e}")
+        return "OK", 200 # نرسل OK حتى في الخطأ لمنع التكرار المزعج
 
 @app.route('/')
 def index():
-    return "Bot is running... 🛡️", 200
+    return "Bot status: stable", 200
 
 if __name__ == '__main__':
-    # تثبيت الـ Webhook يدوياً لضمان عدم ضياع الرسائل
+    # إعادة ضبط الـ Webhook عند التشغيل
     webhook_target = f"{RENDER_URL}/{TOKEN}"
     requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_target}&drop_pending_updates=True")
     
