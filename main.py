@@ -10,26 +10,31 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 TOKEN = os.environ.get('TOKEN')
 RENDER_URL = "https://al-harris.onrender.com" 
 APP_URL = "https://attaandtakadom.github.io/atta/"
-CHANNEL_USERNAME = "your_channel_username"  # استخدم username بدلاً من ID
+CHANNEL_ID = '-1003569921331'  # يمكنك استخدام ID القناة
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# --- 2. تهيئة التطبيق (مصححة) ---
 application = Application.builder().token(TOKEN).build()
 
-# --- 2. دوال المساعدة ---
+# --- 3. دوال المساعدة ---
 async def check_subscription(user_id):
     try:
-        # استخدم username إن أمكن
-        member = await application.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        # تهيئة التطبيق إذا لم يكن مهيأً
+        if not application._initialized:
+            await application.initialize()
+            
+        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         return member.status in ['member', 'administrator', 'creator']
     except Exception as e:
         logger.error(f"خطأ في فحص الاشتراك: {e}")
         return False
 
-# --- 3. معالج أمر /start ---
+# --- 4. معالج أمر /start ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
@@ -52,7 +57,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# --- 4. معالج الضغط على الأزرار ---
+# --- 5. معالج الضغط على الأزرار ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -75,20 +80,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]])
             )
 
-# --- 5. تسجيل المعالجات ---
+# --- 6. تسجيل المعالجات ---
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# --- 6. Webhook ---
+# --- 7. Webhook معالج ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
         
-        # معالجة التحديث بشكل غير متزامن
+        # معالجة التحديث بشكل غير متزامن مع تهيئة التطبيق
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
+        # تهيئة التطبيق قبل المعالجة
+        if not application._initialized:
+            loop.run_until_complete(application.initialize())
+        
         loop.run_until_complete(application.process_update(update))
         loop.close()
         
@@ -101,10 +111,18 @@ def webhook():
 def index():
     return "Bot is running!", 200
 
+@app.route('/setwebhook')
+def set_webhook():
+    """Endpoint يدوي لتعيين webhook"""
+    webhook_url = f"{RENDER_URL}/{TOKEN}"
+    response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
+    return response.json()
+
 if __name__ == '__main__':
     # تعيين webhook
     webhook_url = f"{RENDER_URL}/{TOKEN}"
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
+    response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
+    logger.info(f"Webhook set response: {response.json()}")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
