@@ -18,28 +18,25 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# بناء التطبيق مرة واحدة عند التشغيل
+# بناء التطبيق
 application = Application.builder().token(TOKEN).build()
 
-# --- 2. دالة فحص الاشتراك ---
+# --- 2. دالة فحص الاشتراك (نحولها لتعمل داخل Loop) ---
 async def check_subscription(user_id):
     try:
-        # استخدام البوت لفحص العضوية
         member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         return member.status in ['member', 'administrator', 'creator']
     except Exception as e:
         logger.error(f"Subscription Check Error: {e}")
         return False
 
-# --- 3. معالجة الرد (المنطق) ---
+# --- 3. معالجة الرد ---
 async def process_update_logic(update: Update):
     user = update.effective_user
     if not user:
         return
 
     user_id = user.id
-    
-    # التأكد من الاشتراك
     is_subscribed = await check_subscription(user_id)
     
     if is_subscribed:
@@ -59,18 +56,21 @@ async def process_update_logic(update: Update):
         parse_mode='Markdown'
     )
 
-# --- 4. الـ Webhook المطور ---
+# --- 4. الـ Webhook (تم التعديل ليكون متوافقاً بدون async extra) ---
 @app.route(f'/{TOKEN}', methods=['POST'])
-async def webhook():
+def webhook():
     try:
-        # تحويل البيانات القادمة إلى كائن تحديث
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
         
-        # تشغيل المنطق الخاص بالبوت
+        # إنشاء دورة أحداث مؤقتة لمعالجة الطلب
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         if update.message and update.message.text:
-            await process_update_logic(update)
-            
+            loop.run_until_complete(process_update_logic(update))
+        
+        loop.close()
         return "OK", 200
     except Exception as e:
         logger.error(f"Webhook Error: {e}")
@@ -78,16 +78,18 @@ async def webhook():
 
 @app.route('/')
 def index():
-    return "Bot is Protecting the Channel! 🛡️", 200
+    return "Bot is Active! 🚀", 200
 
 if __name__ == '__main__':
-    # ربط الـ Webhook مع تلجرام
+    # ربط الـ Webhook
     webhook_path = f"{RENDER_URL}/{TOKEN}"
     requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_path}&drop_pending_updates=True")
     
-    # تهيئة البوت داخلياً قبل تشغيل Flask
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(application.initialize())
+    # تهيئة البوت
+    init_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(init_loop)
+    init_loop.run_until_complete(application.initialize())
+    init_loop.close()
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
