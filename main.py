@@ -4,7 +4,7 @@ import asyncio
 import requests
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application
 
 # --- 1. الإعدادات ---
 TOKEN = os.environ.get('TOKEN')
@@ -13,144 +13,70 @@ APP_URL = "https://attaandtakadom.github.io/atta/"
 CHANNEL_ID = '-1003569921331' 
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
 
-# تصحيح خطأ logging - تغيير asime إلى asctime
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# --- 2. تهيئة التطبيق ---
 application = Application.builder().token(TOKEN).build()
 
-# --- 3. دوال المساعدة ---
-async def check_subscription(user_id):
+# --- 2. معالجة الرد (بشكل سريع) ---
+async def handle_logic(update: Update):
     try:
-        # تهيئة التطبيق إذا لم يكن مهيأً
-        if not application._initialized:
-            await application.initialize()
-            
-        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except Exception as e:
-        logger.error(f"خطأ في فحص الاشتراك: {e}")
-        return False
+        user = update.effective_user
+        if not user: return
 
-# --- 4. معالج أمر /start ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    
-    # فحص الاشتراك
-    is_subscribed = await check_subscription(user.id)
-    
-    if is_subscribed:
-        keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-        text = f"✅ أهلاً بك يا {user.first_name}\nتم التأكد من انضمامك للقناة بنجاح!"
-    else:
-        keyboard = [
-            [InlineKeyboardButton("📢 اشترك في القناة", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_subscription")]
-        ]
-        text = "⚠️ **عذراً! يجب الاشتراك في القناة أولاً**\n\nاشترك ثم اضغط على زر التحقق."
+        # فحص الاشتراك
+        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user.id)
+        is_subscribed = member.status in ['member', 'administrator', 'creator']
+        
+        if is_subscribed:
+            keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
+            text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح."
+        else:
+            keyboard = [
+                [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
+                [InlineKeyboardButton("2️⃣ اضغط هنا للتفعيل ✅", url=f"https://t.me/takadom2026bot?start=check")]
+            ]
+            text = "⚠️ **عذراً! يجب عليك الانضمام للقناة أولاً.**"
 
-    try:
-        await update.message.reply_text(
+        await application.bot.send_message(
+            chat_id=update.effective_chat.id,
             text=text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"خطأ في إرسال الرد: {e}")
+        logger.error(f"Logic Error: {e}")
 
-# --- 5. معالج الضغط على الأزرار ---
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "check_subscription":
-        user = update.effective_user
-        is_subscribed = await check_subscription(user.id)
-        
-        if is_subscribed:
-            keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-            await query.edit_message_text(
-                text=f"✅ تم التحقق بنجاح! أهلاً بك يا {user.first_name}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            await query.edit_message_text(
-                text="❌ لم يتم الاشتراك بعد. يرجى الاشتراك في القناة أولاً.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📢 اشترك الآن", url=CHANNEL_LINK)
-                ]])
-            )
-
-# --- 6. تسجيل المعالجات ---
-application.add_handler(CommandHandler("start", start_command))
-application.add_handler(CallbackQueryHandler(button_handler))
-
-# --- 7. Webhook معالج ---
+# --- 3. الـ Webhook السريع جداً ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
+    update_json = request.get_json(force=True)
+    update = Update.de_json(update_json, application.bot)
+    
+    # تشغيل المعالجة في "الخلفية" دون تعطيل الرد على تلجرام
     try:
-        update_json = request.get_json(force=True)
-        update = Update.de_json(update_json, application.bot)
-        
-        # معالجة التحديث بشكل غير متزامن
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
-        # تهيئة التطبيق قبل المعالجة
-        if not application._initialized:
-            loop.run_until_complete(application.initialize())
-        
-        loop.run_until_complete(application.process_update(update))
-        loop.close()
-        
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Webhook Error: {str(e)}")
-        return "OK", 200
+    
+    loop.create_task(handle_logic(update))
+    
+    return "OK", 200 # الرد فوراً لإيقاف علامة التحميل في تلجرام
 
 @app.route('/')
 def index():
-    return "Bot is running!", 200
-
-@app.route('/setwebhook')
-def set_webhook():
-    """Endpoint يدوي لتعيين webhook"""
-    try:
-        webhook_url = f"{RENDER_URL}/{TOKEN}"
-        response = requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
-            params={"url": webhook_url, "drop_pending_updates": True}
-        )
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.route('/webhook-info')
-def webhook_info():
-    """التحقق من معلومات webhook الحالية"""
-    try:
-        response = requests.get(f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo")
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
+    return "Status: Active 🚀", 200
 
 if __name__ == '__main__':
-    # تعيين webhook عند بدء التشغيل
-    webhook_url = f"{RENDER_URL}/{TOKEN}"
-    try:
-        response = requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
-            params={"url": webhook_url, "drop_pending_updates": True}
-        )
-        logger.info(f"Webhook set response: {response.json()}")
-    except Exception as e:
-        logger.error(f"خطأ في تعيين webhook: {e}")
+    # تهيئة أولية سريعة
+    init_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(init_loop)
+    init_loop.run_until_complete(application.initialize())
+    
+    # ضبط الـ Webhook
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={RENDER_URL}/{TOKEN}&drop_pending_updates=True")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
