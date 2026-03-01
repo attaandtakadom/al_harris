@@ -10,15 +10,19 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 TOKEN = os.environ.get('TOKEN')
 RENDER_URL = "https://al-harris.onrender.com" 
 APP_URL = "https://attaandtakadom.github.io/atta/"
-CHANNEL_ID = '-1003569921331'  # يمكنك استخدام ID القناة
+CHANNEL_ID = '-1003569921331' 
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
 
-logging.basicConfig(format='%(asime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# تصحيح خطأ logging - تغيير asime إلى asctime
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- 2. تهيئة التطبيق (مصححة) ---
+# --- 2. تهيئة التطبيق ---
 application = Application.builder().token(TOKEN).build()
 
 # --- 3. دوال المساعدة ---
@@ -51,11 +55,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         text = "⚠️ **عذراً! يجب الاشتراك في القناة أولاً**\n\nاشترك ثم اضغط على زر التحقق."
 
-    await update.message.reply_text(
-        text=text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    try:
+        await update.message.reply_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"خطأ في إرسال الرد: {e}")
 
 # --- 5. معالج الضغط على الأزرار ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,7 +98,7 @@ def webhook():
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
         
-        # معالجة التحديث بشكل غير متزامن مع تهيئة التطبيق
+        # معالجة التحديث بشكل غير متزامن
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
@@ -104,7 +111,7 @@ def webhook():
         
         return "OK", 200
     except Exception as e:
-        logger.error(f"Webhook Error: {e}")
+        logger.error(f"Webhook Error: {str(e)}")
         return "OK", 200
 
 @app.route('/')
@@ -114,15 +121,36 @@ def index():
 @app.route('/setwebhook')
 def set_webhook():
     """Endpoint يدوي لتعيين webhook"""
-    webhook_url = f"{RENDER_URL}/{TOKEN}"
-    response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
-    return response.json()
+    try:
+        webhook_url = f"{RENDER_URL}/{TOKEN}"
+        response = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
+            params={"url": webhook_url, "drop_pending_updates": True}
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/webhook-info')
+def webhook_info():
+    """التحقق من معلومات webhook الحالية"""
+    try:
+        response = requests.get(f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo")
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == '__main__':
-    # تعيين webhook
+    # تعيين webhook عند بدء التشغيل
     webhook_url = f"{RENDER_URL}/{TOKEN}"
-    response = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
-    logger.info(f"Webhook set response: {response.json()}")
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
+            params={"url": webhook_url, "drop_pending_updates": True}
+        )
+        logger.info(f"Webhook set response: {response.json()}")
+    except Exception as e:
+        logger.error(f"خطأ في تعيين webhook: {e}")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
