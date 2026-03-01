@@ -17,79 +17,69 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# بناء التطبيق وتهيئته عالمياً
+# إنشاء التطبيق لمرة واحدة
 application = Application.builder().token(TOKEN).build()
 
-# دالة مساعدة لتشغيل المهام غير المتزامنة داخل Flask العادي
-def run_async(coro):
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
-
-# --- 2. دالة فحص الاشتراك ---
-async def check_subscription(user_id):
-    try:
-        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except Exception as e:
-        logger.error(f"Subscription Check Error: {e}")
-        return False
-
-# --- 3. معالجة الرد ---
-async def process_update_logic(update: Update):
+# --- 2. دالة المعالجة الأساسية ---
+async def handle_update(update: Update):
     user = update.effective_user
     if not user: return
-    
-    is_subscribed = await check_subscription(user.id)
-    
-    if is_subscribed:
-        keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-        text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح."
-    else:
-        keyboard = [
-            [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ اضغط هنا بعد الاشتراك ✅", url=f"https://t.me/{application.bot.username}?start=check")]
-        ]
-        text = "⚠️ **عذراً، يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
 
-    await application.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    try:
+        # فحص الاشتراك مباشرة من البوت
+        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user.id)
+        is_subscribed = member.status in ['member', 'administrator', 'creator']
+        
+        if is_subscribed:
+            keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
+            text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح."
+        else:
+            keyboard = [
+                [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
+                [InlineKeyboardButton("2️⃣ اضغط هنا بعد الاشتراك ✅", url=f"https://t.me/{application.bot.username}?start=check")]
+            ]
+            text = "⚠️ **عذراً، يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
 
-# --- 4. الـ Webhook المستقر ---
+        await application.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_update: {e}")
+
+# --- 3. الـ Webhook المستقر ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
         
-        if update.message and update.message.text:
-            # تشغيل المنطق باستخدام الدالة المساعدة لضمان وجود Loop
-            run_async(process_update_logic(update))
-            
+        # الحل السحري: إنشاء Loop جديد كلياً لكل طلب ومعالجته حتى النهاية
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        new_loop.run_until_complete(handle_update(update))
+        new_loop.close()
+        
         return "OK", 200
     except Exception as e:
-        logger.error(f"Webhook Execution Error: {e}")
+        logger.error(f"Webhook Exception: {e}")
         return "Error", 500
 
 @app.route('/')
 def index():
-    return "Bot is running perfectly! 🚀", 200
+    return "Bot is stable and running! 🚀", 200
 
 if __name__ == '__main__':
-    # ضبط الـ Webhook تلقائياً
+    # تهيئة البوت وضبط الـ Webhook
     webhook_path = f"{RENDER_URL}/{TOKEN}"
     requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_path}&drop_pending_updates=True")
     
-    # تهيئة البوت مرة واحدة عند بدء التشغيل
-    run_async(application.initialize())
+    # تهيئة أولية للتطبيق
+    temp_loop = asyncio.new_event_loop()
+    temp_loop.run_until_complete(application.initialize())
+    temp_loop.close()
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
