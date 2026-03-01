@@ -4,13 +4,13 @@ import asyncio
 import requests
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # --- 1. الإعدادات ---
 TOKEN = os.environ.get('TOKEN')
 RENDER_URL = "https://al-harris.onrender.com" 
 APP_URL = "https://attaandtakadom.github.io/atta/"
-CHANNEL_ID = '-1003569921331' 
+CHANNEL_USERNAME = "your_channel_username"  # استخدم username بدلاً من ID
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -19,25 +19,20 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
 
-# مخزن مؤقت لمنع تكرار الرسائل (Idempotency)
-processed_updates = set()
-
-# --- 2. دالة فحص الاشتراك المحسنة ---
+# --- 2. دوال المساعدة ---
 async def check_subscription(user_id):
     try:
-        # إضافة تأخير بسيط لضمان تحديث قاعدة بيانات تلجرام
-        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        # الحالات التي يعتبر فيها المستخدم مشتركاً
+        # استخدم username إن أمكن
+        member = await application.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         return member.status in ['member', 'administrator', 'creator']
     except Exception as e:
         logger.error(f"خطأ في فحص الاشتراك: {e}")
         return False
 
-# --- 3. المنطق البرمجي ---
-async def process_update_logic(update: Update):
+# --- 3. معالج أمر /start ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user: return
-
+    
     # فحص الاشتراك
     is_subscribed = await check_subscription(user.id)
     
@@ -46,58 +41,70 @@ async def process_update_logic(update: Update):
         text = f"✅ أهلاً بك يا {user.first_name}\nتم التأكد من انضمامك للقناة بنجاح!"
     else:
         keyboard = [
-            [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ اضغط هنا للتفعيل ✅", url=f"https://t.me/takadom2026bot?start=check")]
+            [InlineKeyboardButton("📢 اشترك في القناة", url=CHANNEL_LINK)],
+            [InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_subscription")]
         ]
-        text = "⚠️ **عذراً! لم نجد اسمك في القناة.**\n\nيرجى الاشتراك أولاً ثم العودة والضغط على زر التفعيل."
+        text = "⚠️ **عذراً! يجب الاشتراك في القناة أولاً**\n\nاشترك ثم اضغط على زر التحقق."
 
-    try:
-        await application.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error sending message: {e}")
+    await update.message.reply_text(
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
 
-# --- 4. الـ Webhook مع مانع التكرار ---
+# --- 4. معالج الضغط على الأزرار ---
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "check_subscription":
+        user = update.effective_user
+        is_subscribed = await check_subscription(user.id)
+        
+        if is_subscribed:
+            keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
+            await query.edit_message_text(
+                text=f"✅ تم التحقق بنجاح! أهلاً بك يا {user.first_name}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await query.edit_message_text(
+                text="❌ لم يتم الاشتراك بعد. يرجى الاشتراك في القناة أولاً.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📢 اشترك الآن", url=CHANNEL_LINK)
+                ]])
+            )
+
+# --- 5. تسجيل المعالجات ---
+application.add_handler(CommandHandler("start", start_command))
+application.add_handler(CallbackQueryHandler(button_handler))
+
+# --- 6. Webhook ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     try:
         update_json = request.get_json(force=True)
-        update_id = update_json.get('update_id')
-
-        # منع تكرار المعالجة لنفس الرسالة
-        if update_id in processed_updates:
-            return "OK", 200
-        
-        processed_updates.add(update_id)
-        # تنظيف المخزن إذا كبر حجمه
-        if len(processed_updates) > 1000:
-            processed_updates.clear()
-
         update = Update.de_json(update_json, application.bot)
         
-        # إنشاء Loop للمعالجة
+        # معالجة التحديث بشكل غير متزامن
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(process_update_logic(update))
+        loop.run_until_complete(application.process_update(update))
         loop.close()
-            
-        return "OK", 200 # الرد فوراً بـ OK لتلجرام لمنع إعادة الإرسال
+        
+        return "OK", 200
     except Exception as e:
         logger.error(f"Webhook Error: {e}")
-        return "OK", 200 # نرسل OK حتى في الخطأ لمنع التكرار المزعج
+        return "OK", 200
 
 @app.route('/')
 def index():
-    return "Bot status: stable", 200
+    return "Bot is running!", 200
 
 if __name__ == '__main__':
-    # إعادة ضبط الـ Webhook عند التشغيل
-    webhook_target = f"{RENDER_URL}/{TOKEN}"
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_target}&drop_pending_updates=True")
+    # تعيين webhook
+    webhook_url = f"{RENDER_URL}/{TOKEN}"
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
