@@ -1,89 +1,86 @@
 import os
 import logging
-import asyncio
 import requests
-import threading
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application
 
 # --- 1. الإعدادات ---
 TOKEN = os.environ.get('TOKEN')
-RENDER_URL = "https://al-harris.onrender.com" 
+RENDER_URL = "https://al-harris.onrender.com"
 APP_URL = "https://attaandtakadom.github.io/atta/"
-CHANNEL_ID = '-1003569921331' 
+CHANNEL_ID = '-1003569921331'
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-application = Application.builder().token(TOKEN).build()
 
-# --- 2. معالجة المنطق (Async) ---
-async def handle_async_logic(update: Update):
+# --- 2. وظائف التفاعل عبر API تلجرام المباشر ---
+
+def send_telegram_request(method, data):
+    url = f"https://api.telegram.org/bot{TOKEN}/{method}"
     try:
-        user = update.effective_user
-        if not user: return
-        
-        # فحص الاشتراك
-        member = await application.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user.id)
-        is_subscribed = member.status in ['member', 'administrator', 'creator']
-        
-        if is_subscribed:
-            keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-            text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح."
-        else:
-            keyboard = [
-                [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
-                [InlineKeyboardButton("2️⃣ اضغط هنا للتفعيل ✅", url=f"https://t.me/takadom2026bot?start=check")]
-            ]
-            text = "⚠️ **عذراً! يجب عليك الانضمام للقناة أولاً.**"
-
-        await application.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
+        response = requests.post(url, json=data, timeout=10)
+        return response.json()
     except Exception as e:
-        logger.error(f"Logic Error: {e}")
+        logger.error(f"Telegram API Error ({method}): {e}")
+        return None
 
-# دالة وسيطة لتشغيل الـ Async داخل Thread
-def run_async_in_thread(update):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(handle_async_logic(update))
-    loop.close()
+def check_subscription(user_id):
+    data = {"chat_id": CHANNEL_ID, "user_id": user_id}
+    res = send_telegram_request("getChatMember", data)
+    if res and res.get("ok"):
+        status = res["result"]["status"]
+        return status in ['member', 'administrator', 'creator']
+    return False
 
-# --- 3. الـ Webhook (الرد الفوري الصاعق) ---
+def handle_logic(update):
+    if "message" in update:
+        user = update["message"]["from"]
+        chat_id = update["message"]["chat"]["id"]
+    elif "callback_query" in update:
+        user = update["callback_query"]["from"]
+        chat_id = update["callback_query"]["message"]["chat"]["id"]
+    else:
+        return
+
+    user_id = user["id"]
+    first_name = user.get("first_name", "أهلاً بك")
+
+    if check_subscription(user_id):
+        text = f"✅ أهلاً بك يا {first_name}\nتم التحقق من اشتراكك بنجاح. يمكنك الدخول للمنظومة الآن:"
+        keyboard = {"inline_keyboard": [[{"text": "دخول المنظومة 📱", "web_app": {"url": APP_URL}}]]}
+    else:
+        text = "⚠️ **عذراً! يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
+        keyboard = {"inline_keyboard": [
+            [{"text": "1️⃣ اشترك في القناة أولاً 📢", "url": CHANNEL_LINK}],
+            [{"text": "2️⃣ اضغط هنا للتفعيل ✅", "url": f"https://t.me/takadom2026bot?start=check"}]
+        ]}
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "reply_markup": keyboard,
+        "parse_mode": "Markdown"
+    }
+    send_telegram_request("sendMessage", payload)
+
+# --- 3. الـ Webhook المستقر ---
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    try:
-        update_json = request.get_json(force=True)
-        update = Update.de_json(update_json, application.bot)
-        
-        # تشغيل المعالجة في خيط مستقل تماماً (Thread)
-        # هذا يضمن أن Flask يرد بـ OK فوراً لتلجرام ويختفي التبريم
-        threading.Thread(target=run_async_in_thread, args=(update,)).start()
-        
-        return "OK", 200 
-    except Exception as e:
-        logger.error(f"Webhook Error: {e}")
-        return "OK", 200
+    update = request.get_json(force=True)
+    # المعالجة فوراً دون الحاجة لـ Loop أو Threads معقدة
+    handle_logic(update)
+    return "OK", 200
 
 @app.route('/')
 def index():
-    return "System: Online 🟢", 200
+    return "Bot is stable and running! 🚀", 200
 
 if __name__ == '__main__':
-    # تهيئة البوت مرة واحدة
-    init_loop = asyncio.new_event_loop()
-    init_loop.run_until_complete(application.initialize())
-    init_loop.close()
-    
-    # ضبط الـ Webhook
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={RENDER_URL}/{TOKEN}&drop_pending_updates=True")
+    # ضبط الـ Webhook عند التشغيل
+    webhook_target = f"{RENDER_URL}/{TOKEN}"
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_target}&drop_pending_updates=True")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
