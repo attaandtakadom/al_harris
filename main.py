@@ -8,7 +8,8 @@ from telegram.ext import Application
 
 # --- 1. الإعدادات ---
 TOKEN = os.environ.get('TOKEN')
-RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL') 
+# تأكد من كتابة الرابط يدوياً هنا لضمان الدقة
+RENDER_URL = "https://al-harris.onrender.com" 
 APP_URL = "https://attaandtakadom.github.io/atta/"
 CHANNEL_ID = '-1003569921331' 
 CHANNEL_LINK = 'https://t.me/+PiPTzWzduThiZjBk'
@@ -17,7 +18,6 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-# إنشاء التطبيق بدون تعقيدات إضافية
 application = Application.builder().token(TOKEN).build()
 
 # --- 2. دالة فحص الاشتراك ---
@@ -29,7 +29,7 @@ async def check_subscription(user_id):
         logger.error(f"Subscription Error: {e}")
         return False
 
-# --- 3. المنطق البرمجي (تم تعديله ليعمل في الخاص) ---
+# --- 3. المنطق البرمجي الاستجابة ---
 async def process_update_logic(update: Update):
     user = update.effective_user
     chat_id = update.effective_chat.id
@@ -39,13 +39,15 @@ async def process_update_logic(update: Update):
     
     if is_subscribed:
         keyboard = [[InlineKeyboardButton("دخول المنظومة 📱", web_app=WebAppInfo(url=APP_URL))]]
-        text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح."
+        text = f"✅ أهلاً بك يا {user.first_name}\nتم التحقق من اشتراكك بنجاح. اضغط على الزر أدناه للدخول:"
     else:
+        # زر الاشتراك مع رابط يفتح البوت مباشرة بعد الاشتراك
+        bot_username = (await application.bot.get_me()).username
         keyboard = [
             [InlineKeyboardButton("1️⃣ اشترك في القناة أولاً 📢", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("2️⃣ اضغط هنا بعد الاشتراك ✅", url=f"https://t.me/{application.bot.username}?start=check")]
+            [InlineKeyboardButton("2️⃣ اضغط هنا لتفعيل البوت ✅", url=f"https://t.me/{bot_username}?start=check")]
         ]
-        text = "⚠️ **عذراً، يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
+        text = "⚠️ **يجب عليك الانضمام للقناة أولاً لتتمكن من استخدام المنظومة!**"
 
     await application.bot.send_message(
         chat_id=chat_id,
@@ -61,7 +63,7 @@ def webhook():
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
         
-        # معالجة الرسائل والأزرار
+        # معالجة كافة أنواع الرسائل (في الخاص أو عبر الروابط)
         if update.message or update.callback_query:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -78,9 +80,9 @@ def index():
     return "Bot is running... 🛡️", 200
 
 if __name__ == '__main__':
-    # إعادة ضبط الـ Webhook يدوياً عند التشغيل
-    webhook_url = f"https://al-harris.onrender.com/{TOKEN}"
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}&drop_pending_updates=True")
+    # تثبيت الـ Webhook يدوياً لضمان عدم ضياع الرسائل
+    webhook_target = f"{RENDER_URL}/{TOKEN}"
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_target}&drop_pending_updates=True")
     
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=PORT)
